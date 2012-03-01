@@ -1,0 +1,106 @@
+#!/bin/bash
+# Cory Backup script version 1.0
+
+# This script conditionally backs up all manner of interesting things to /var/backups.
+# It overwrites the files every time it runs.  It is assumed that something is sending
+# the contents somewhere.
+TODAY=`date +%A`
+
+DATABASES=
+MYDATABASES=
+BACKUPDIR=/var/backups/
+CMD="tar czf"
+HOSTNAME=`hostname -f`
+SYNC="s3cmd --no-progress sync $BACKUPDIR s3://XXXREPLACEME/$HOSTNAME/$TODAY/"
+
+# Get our configuration.  If it's not there, we'll run with the above defaults
+if [ -f /etc/default/backup ]
+then
+	source /etc/default/backup
+fi
+
+# Backup databases (if there are any)
+for DB in $DATABASES
+do
+	pg_dump $DB -Z 6 -f $BACKUPDIR/$DB.gz
+done
+
+# Backup MySQL database (if there are any)
+for MYDB in $MYDATABASES
+do
+    mysqldump -u backup --single-transaction $MYDB | bzip2 > $BACKUPDIR/$MYDB.bz2
+done
+
+# Backup postfix
+if [ -d /etc/postfix ]
+then
+	$CMD $BACKUPDIR/postfix.tar.gz -C /etc postfix
+fi
+
+# Backup Apache config
+if [ -d /etc/apache2 ]
+then
+	$CMD $BACKUPDIR/apache.tar.gz -C /etc apache2
+fi
+
+# Backup SSL config
+if [ -d /etc/ssl ]
+then
+	$CMD $BACKUPDIR/ssl.tar.gz -C /etc ssl
+fi
+
+# Backup Munin
+if [ -d /etc/munin ]
+then
+	$CMD $BACKUPDIR/munin.tar.gz -C /etc munin
+fi
+
+# Backup Nagios (client)
+if [ -d /etc/nagios ]
+then
+	$CMD $BACKUPDIR/nagios.tar.gz -C /etc nagios
+fi
+
+# Backup Nagios (server)
+if [ -d /etc/nagios3 ]
+then
+	$CMD $BACKUPDIR/nagios3.tar.gz -C /etc nagios3
+fi
+
+## A NOTE ABOUT RCS BACKUPS
+# I'm being lazy an assuming that nobody is going to be mid-commit
+# at the time that the backup script runs.  Hence I'm just tarring
+# and gzipping.
+
+# Backup Git Repositories
+if [ -d /srv/gitosis ]
+then
+	$CMD $BACKUPDIR/gitosis.tar.gz -C /srv gitosis
+fi
+
+# Backup Subversion Repositories
+if [ -d /srv/subversion ]
+then
+	$CMD $BACKUPDIR/subversion.tar.gz -C /srv subversion
+fi
+
+JIRABACKUPDIR=/usr/local/jira/data/export
+# Backup JIRA backups
+if [ -d $JIRABACKUPDIR ]
+then
+    cd $JIRABACKUPDIR
+    JIRABACKUP=`ls -t -r | tail -n 1`
+    cp $JIRABACKUPDIR/$JIRABACKUP $BACKUPDIR/jira.zip
+fi
+
+FISHEYEBACKUPDIR=/usr/local/fisheye/data/backup
+# Backup Fisheye backups
+if [ -d $FISHEYEBACKUPDIR ]
+then
+    cd $FISHEYEBACKUPDIR
+    FISHEYEBACKUP=`ls -t -r | tail -n 1`
+    cp $FISHEYEBACKUPDIR/$FISHEYEBACKUP $BACKUPDIR/fisheye.zip
+fi
+
+# This sends it output to /dev/null because it has no damned quiet option.
+$SYNC > /dev/null
